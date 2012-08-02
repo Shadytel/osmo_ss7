@@ -116,7 +116,7 @@ request({ipa_unblock, Socket}) ->
 split_ipa_msg(DataBin) ->
 	% FIXME: This will throw an exception if DataBin doesn't contain all payload
 	<<Length:16/big-unsigned-integer, StreamID:8, Payload:Length/binary, Trailer/binary>> = DataBin,
-	io:format("Stream ~p, ~p bytes~n", [StreamID, Length]),
+%	io:format("Stream ~p, ~p bytes~n", [StreamID, Length]),
 	{StreamID, Payload, Trailer}.
 
 % deliver an incoming message to the process that is registered for the socket/stream_id
@@ -201,6 +201,7 @@ init_sock(Socket, CallingPid) ->
 	loop(Socket, StreamMap).
 
 loop(S, StreamMap) ->
+	inet:setopts(S, [{active, once}]),
 	receive
 		{request, From, Request} ->
 			Reply = ipa_proto:request(Request),
@@ -223,12 +224,13 @@ loop(S, StreamMap) ->
 
 % Respond with PONG to PING
 process_ccm_msg(Socket, StreamID, ?IPAC_MSGT_PING, _) ->
-	io:format("Socket ~p Stream ~p: PING -> PONG~n", [Socket, StreamID]),
+%	io:format("Socket ~p Stream ~p: PING -> PONG~n", [Socket, StreamID]),
 	send(Socket, StreamID, <<?IPAC_MSGT_PONG>>);
 % Simply respond to ID_ACK with ID_ACK
 process_ccm_msg(Socket, StreamID, ?IPAC_MSGT_ID_ACK, _) ->
-	io:format("Socket ~p Stream ~p: ID_ACK -> ID_ACK~n", [Socket, StreamID]),
-	send(Socket, StreamID, <<?IPAC_MSGT_ID_ACK>>);
+%	io:format("Socket ~p Stream ~p: ID_ACK -> ID_ACK~n", [Socket, StreamID]),
+%	send(Socket, StreamID, <<?IPAC_MSGT_ID_ACK>>);
+    ok;
 % Simply respond to ID_RESP with ID_ACK
 process_ccm_msg(Socket, StreamID, ?IPAC_MSGT_ID_RESP, _) ->
 	io:format("Socket ~p Stream ~p: ID_RESP -> ID_ACK~n", [Socket, StreamID]),
@@ -279,12 +281,16 @@ connect(Address, Port, Options, Timeout) ->
 			{error, Reason}
 	end.
 
+start_listen(LPort, NumServers, Opts) ->
+    start_listen(LPort, NumServers, Opts, self()).
+
 % Utility function to continuously server incomming IPA connections on a
 % listening TCP socket
-start_listen(LPort, NumServers, Opts) ->
+start_listen(LPort, NumServers, Opts, CtrlPid) ->
+    io:format("Pid of controller is ~p~n", [CtrlPid]),
 	case gen_tcp:listen(LPort, ?IPA_SOCKOPTS ++ Opts) of
 		{ok, ListenSock} ->
-			start_servers(NumServers, ListenSock, self()),
+			start_servers(NumServers, ListenSock, CtrlPid),
 			{ok, Port} = inet:port(ListenSock),
 			Port;
 		{error, Reason} ->
@@ -302,6 +308,9 @@ listen_server(LS, CtrlPid) ->
 		{ok, S} ->
 			io:format("Accepted TCP connection from ~p~n", [inet:peername(S)]),
 			% assign the socket to the Controlling process
+			ipa_proto:register_socket(S),
+%			ipa_proto:register_stream(S, 0, CtrlPid),
+%			ipa_proto:register_stream(S, 255, CtrlPid),
 			gen_tcp:controlling_process(S, CtrlPid),
 			CtrlPid ! {ipa_tcp_accept, S},
 			listen_server(LS, CtrlPid);
